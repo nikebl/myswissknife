@@ -1,6 +1,7 @@
 #!/bin/bash
 
 EXT_IF="eth0"
+EXT_PORT="443"
 EXT_IP=""
 CERT_EMAIL_TO=""
 while [[ ! ${EXT_IP} =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; do
@@ -9,14 +10,15 @@ while [[ ! ${EXT_IP} =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; do
 done
 
 yum -y install epel-release
-yum -y install openvpn easy-rsa mailx
+yum -y install openvpn easy-rsa mailx iptables-services
 cd /etc/openvpn && mkdir -p easy-rsa/keys
 cat <<EOF > server.conf
 local 0.0.0.0
 mssfix 1400
-port 443
+port ${EXT_PORT}
 proto tcp
 dev tun
+comp-lzo
 ca easy-rsa/keys/ca.crt
 cert easy-rsa/keys/server.crt
 key easy-rsa/keys/server.key  # This file should be kept secret
@@ -89,7 +91,7 @@ systemctl enable iptables.service
 systemctl start iptables.service
 
 iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -o ${EXT_IF} -j MASQUERADE
-iptables -I INPUT 1 -p tcp -m tcp --dport 443 -m state --state NEW -j ACCEPT
+iptables -I INPUT 1 -p tcp -m tcp --dport ${EXT_PORT} -m state --state NEW -j ACCEPT
 iptables -I FORWARD 1 -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables -I FORWARD 1 -s 10.8.0.0/24 -i tun0 -o ${EXT_IF} -j ACCEPT
 #firewall-cmd --zone=`firewall-cmd --get-zone-of-interface=${EXT_IF}` --add-service=https
@@ -106,7 +108,7 @@ client
 mssfix 1400
 dev tun
 proto tcp
-remote ${EXT_IP} 443
+remote ${EXT_IP} ${EXT_PORT}
 resolv-retry infinite
 nobind
 persist-key
