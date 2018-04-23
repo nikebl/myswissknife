@@ -2,8 +2,14 @@
 
 EXT_IF="eth0"
 EXT_IP=""
+CERT_EMAIL_TO=""
+while [[ ! ${EXT_IP} =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]]; do
+    echo Please enter Public IP addr.
+    read EXT_IP
+done
 
-yum -y install openvpn easy-rsa
+yum -y install epel-release
+yum -y install openvpn easy-rsa mailx
 cd /etc/openvpn && mkdir -p easy-rsa/keys
 cat <<EOF > server.conf
 local 0.0.0.0
@@ -42,7 +48,7 @@ verb 4
 EOF
 
 cd easy-rsa
-cp -rf /usr/share/easy-rsa/2.0/* /etc/openvpn/easy-rsa/
+cp -rf /usr/share/easy-rsa/3.0/* /etc/openvpn/easy-rsa/
 cat <<EOF >> vars
 export KEY_COUNTRY="US"
 export KEY_PROVINCE="NY"
@@ -55,14 +61,22 @@ export KEY_OU=server
 export KEY_CN=localhost.localdomain
 EOF
 
-cp -r /usr/share/easy-rsa/2.0/openssl-1.0.0.cnf /etc/openvpn/easy-rsa/openssl.cnf
+cp -r /usr/share/easy-rsa/3.0/openssl-1.0.cnf /etc/openvpn/easy-rsa/openssl.cnf
 source ./vars
-./clean-all
-./build-ca
-./build-key-server server
-./build-dh
-./build-key client
+./easyrsa init-pki
+./easyrsa build-ca nopass
+./easyrsa build-server-full server nopass
+./easyrsa gen-dh
+./easyrsa build-client-full client nopass
 openvpn --genkey --secret keys/ta.key
+
+cp -ra pki/issued/client.crt keys/
+cp -ra pki/ca.crt keys/
+cp -ra pki/private/client.key keys/
+cp -ra pki/issued/server.crt keys/
+cp -ra pki/private/server.key keys/
+cp -ra pki/dh.pem keys/dh2048.pem
+
 systemctl enable openvpn@server.service
 systemctl start openvpn@server.service
 
@@ -84,6 +98,8 @@ iptables -I FORWARD 1 -s 10.8.0.0/24 -i tun0 -o ${EXT_IF} -j ACCEPT
 #firewall-cmd --direct --add-rule ipv4 filter FORWARD 0 -i tun* -o ${EXT_IF} -j ACCEPT
 #firewall-cmd --direct --add-rule ipv4 filter FORWARD 0 -i ${EXT_IF} -o tun* -m state --state RELATED,ESTABLISHED -j ACCEPT
 iptables-save > /etc/sysconfig/iptables
+
+
 cd /etc/openvpn/client/
 cat <<EOF > client.conf
 client
@@ -117,3 +133,7 @@ cat /etc/openvpn/easy-rsa/keys/ta.key >> client.conf
 echo "</tls-auth>" >> client.conf
 
 
+cp client.conf client.ovpn
+if ![ -z $CERT_EMAIL_TO ]; then 
+echo "Openvpn Config attached" | mail -a client.ovpn -s "Openvpn Config" ${CERT_EMAIL_TO};
+fi
